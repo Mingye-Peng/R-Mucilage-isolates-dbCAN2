@@ -1,0 +1,1459 @@
+---
+title: "CAZyme_Analysis"
+author: "Shawn Higdon"
+date: "6/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+```{r, message=FALSE}
+library(tidyverse)
+library(RColorBrewer)
+library(gplots)
+library(randomcoloR)
+library(rafalib)
+library(scales)
+library(viridis)
+library(pheatmap)
+library(circlize)
+library(ComplexHeatmap)
+library(Vennerable)
+library(treeio)
+library(ggtree)
+library(ggnewscale)
+library(grid)
+library(gridExtra)
+```
+
+# MetaData
+```{r, message=FALSE}
+
+# ISOLATE LIST
+## Create a list of isolate genome IDs
+cazy_isolate_list <- read.table("./meta_files/cazy_isolate_list.txt")
+
+# ISOLATE ID MAP
+## file containing map for old genome ID and BCW isolate ID
+abb_genome_bcw_labels <- read.csv("./meta_files/abb_genome_bcw_labels.csv", header = T)
+
+# SOURMASH TAXONOMY
+## file containing GTDBv89 taxonomic match from sourmash lca classify with k-size of 31
+all_genome_k31_lca <- read.csv("./sourmash_data/lca-classify-all-k31-gtdb89.csv", header = T)
+
+### add BCW_ID to all_genome_k31_lca
+#all_genome_k31_lca$BCW_ID <- abb_genome_bcw_labels$BCW.ID[match(all_genome_k31_lca$ID, #abb_genome_bcw_labels$old_ID)]
+
+# SINGLE BIN GENOMES
+single_isolate_list <- read_csv("./meta_files/Final_pure_isolate_list_492.csv", col_names = F)
+
+```
+
+# Read in CAZyme Data
+```{r}
+# Read in the hmmscan Search output files for cazyme genes in each isolate's annotated faa list
+all_cazyme_list <- list.files(path = "./dbCAN2/hmmer", pattern = 'hmmer.out', recursive = T, full.names = T)
+
+#all_cazyme_list
+# Create a list of search output tables
+all_cazyme_tbl_list <- lapply(all_cazyme_list, read.delim)
+
+# set colnames
+all_cazyme_colnames <- c("Family",
+                          "HMM_Length",
+                          "Query_ID",
+                          "Query_Length",
+                          "E-value",
+                          "HMM_Start",
+                          "HMM_End",
+                          "Query_Start",
+                          "Query_End",
+                          "Coverage")
+
+all_cazyme_tbl_list <- lapply(all_cazyme_tbl_list, setNames, all_cazyme_colnames)
+
+# Add a column to every table that indicates the isolate genome for each NIF-TIGRFAM hmmscan hit
+all_cazyme_tbl_list <- mapply(cbind, all_cazyme_tbl_list, "ID"=cazy_isolate_list$V1, SIMPLIFY=F)
+
+# Create One Dataframe for NIF-TIGRFAM matches of all isolates
+all_cazyme_df <- do.call('rbind', all_cazyme_tbl_list)
+
+## match old isolate ID on all_cazyme_df to BCW_ID on cazy df
+all_cazyme_df$old_ID <- abb_genome_bcw_labels$old_ID[match(all_cazyme_df$ID, abb_genome_bcw_labels$BCW.ID)]
+
+# check to confirm 611 unique isolates
+nlevels(all_cazyme_df$ID)
+
+# colnames
+colnames(all_cazyme_df)
+
+str(all_cazyme_df)
+
+# inspect
+head(all_cazyme_df)
+
+```
+
+# Hit Filtering - 85% model coverage
+```{r}
+# filter dataset based on HMM model Coverage and E.value
+
+all_cazyme_df_filtered <- all_cazyme_df %>% filter(`E-value` <= 1e-09,
+                                                   `Coverage` >= 0.85)
+```
+
+### Deduplicate Hits
+```{r}
+
+# count number of records for unique combinations of model, Isolate_ID, protein_query_id
+all_cazyme_fdf_dup <- all_cazyme_df_filtered %>% 
+  group_by(Family, ID, Query_ID) %>% 
+  mutate(count=(n()))
+
+all_cazyme_fdf_dedup <- all_cazyme_fdf_dup %>% top_n(1, Coverage)
+
+```
+
+> Removed 40 duplicate CAZY model hits
+
+# Data Formatting
+```{r}
+# create class variable taking first two characters of CAZY HMM values
+all_cazyme_df_filtered <- all_cazyme_df_filtered %>% mutate(class = strtrim(all_cazyme_df_filtered[,1], 2))
+
+# add genus to all_cazyme_df_filtered
+all_cazyme_df_filtered$Genus <- all_genome_k31_lca$genus[match(all_cazyme_df_filtered$ID, all_genome_k31_lca$ID)]
+
+# Change all instances of 'CB' to 'CBM'
+all_cazyme_df_filtered <- all_cazyme_df_filtered %>% mutate(class=replace(class, class == "CB", "CBM")) %>% as.data.frame()
+
+# count number of occurrences of each CAZY class from each genomes filtered, parsed output file from the dbCAN2 pHMM library.
+all_cazyme_df_grouped <- all_cazyme_df_filtered %>% group_by(ID, class) %>% count()
+
+# spread all counts for each cazy class
+all_cazyme_df_spread <- spread(all_cazyme_df_grouped, class, n)
+
+# add zero for NA values
+all_cazyme_df_spread[is.na(all_cazyme_df_spread)] <- 0
+
+# add back genus information
+all_cazyme_df_spread$Genus <- all_genome_k31_lca$genus[match(all_cazyme_df_spread$ID, all_genome_k31_lca$ID)]
+
+# add unassigned to empty cells of genus
+all_cazyme_df_spread$Genus <- sub("^$", "unassigned", all_cazyme_df_spread$Genus)
+
+```
+
+### Sourmash Compare Data
+```{r}
+# read in sourmash k31 compare matrix for single isolate genomes
+sm_k31_cmp <- read.csv("sourmash_data/pure_isolate_492_cmp/pure_isolate_k31_cmp_492.csv", header=T, check.names = F)
+
+# set rownames to colnames
+rownames(sm_k31_cmp) <- colnames(sm_k31_cmp)
+
+# add bcw ids to sm_k31_cmp data frame
+sm_k31_cmp$ID <- rownames(sm_k31_cmp)
+```
+
+# Create Master Data Frame
+```{r}
+# cazy data for single isolates only
+cazy_singles <- all_cazyme_df_spread %>% filter(ID %in% single_isolate_list$X1)
+
+## assign a unique color to each genus
+set.seed(1977)
+genus_colors <- data.frame(Genus = unique(cazy_singles$Genus), Color =  distinctColorPalette(length(unique(cazy_singles$Genus))))
+
+# add genus color
+cazy_singles$genus_color <- genus_colors$Color[match(cazy_singles$Genus, genus_colors$Genus)]
+
+# join sm_k31_df and cazy_singles
+cazy_master <- inner_join(sm_k31_cmp, cazy_singles, by = "ID")
+
+# Genus as Factor
+cazy_master$Genus <- as.factor(cazy_master$Genus)
+str(cazy_master[,493:501])
+
+# Create tx_name Variable with Hybrid genus + Isolate Name: GENUS sp. BCWXXXX
+cazy_master$tx_name <- paste(cazy_master$Genus, sprintf("sp. %s", cazy_master$ID))
+
+# create matrix
+sm_k31_cmp_mat <- as.matrix(cazy_master[,1:492])
+
+rownames(sm_k31_cmp_mat) <- cazy_master$tx_name
+colnames(sm_k31_cmp_mat) <- cazy_master$tx_name
+
+head(rownames(sm_k31_cmp_mat))
+```
+
+
+# Plotting
+
+### ggtree
+
+> Create ggtree with cazy data overlayed as a heatmaps
+
+### All Single Isolates
+```{r}
+# Create Phylo Tree from sourmash matrix
+
+sm_k31_tree_mat <- dist2(sm_k31_cmp_mat)
+
+sm_k31_tree_fit <- hclust(sm_k31_tree_mat)
+
+sm_k31_phylo <- as.phylo(sm_k31_tree_fit)
+
+# set rownames of pgp_master to match tree tip labels
+rownames(cazy_master) <- sm_k31_phylo$tip.label
+
+colnames(cazy_master[,493:501])
+```
+
+
+##### All Isolates
+```{r}
+sm_k31_tree <- ggtree(sm_k31_phylo, color = "black", size = 0.3, layout = "fan", open.angle = 12)
+
+# Add gheatmap 0 for genus
+## reproducible colors
+set.seed(8488)
+pgp0_notip <- gheatmap(sm_k31_tree, cazy_master[, 500, drop = F],
+                     offset = 0,
+                     width = 0.05,
+                     colnames_position = "top",
+                     colnames_angle = 90,
+                     colnames_offset_y = 7.5,
+                     font.size = 4,
+                     color = "grey50") + 
+  scale_fill_manual(values=c("#8EAFEB",
+                             "#9A61CE",
+                             "#8244E7",
+                             "#5DE58E",
+                             "#DE47DF",
+                             "#DFDC8F",
+                             "#79A560",
+                             "#DFE9D4",
+                             "#BDE9B4",
+                             "#E17FD9",
+                             "#9EEADA",
+                             "#6FE453",
+                             "#E1CFE2",
+                             "#5296B1",
+                             "#DA9EC3",
+                             "#919F85",
+                             "#906981",
+                             "#65E2BA",
+                             "#D9B99D",
+                             "#D6EC49",
+                             "#D8905B",
+                             "#DB459C",
+                             "#DC8790",
+                             "#6D79D1",
+                             "#A4C9DC",
+                             "#B0E477",
+                             "#E4C34F",
+                             "#5DD8E0",
+                             "#CFA3E9",
+                             "#E34D56"),
+                    name = "Genus",
+                    guide = guide_legend(
+                      direction = "vertical",
+                      ncol = 2,
+                      title.position = "top",
+                      label.position = "right"
+                      )
+  ) +
+  theme(legend.title = element_text(), legend.key.size = unit(.5, "cm"))
+
+# Add gheatmap 1 for cazyme count
+pgp1_notip <- pgp0_notip + new_scale_fill()
+
+pgp2_notip <- gheatmap(pgp1_notip, cazy_master[, 494:499, drop = F],
+                     offset = 0.2,
+                     width = 0.3,
+                     colnames_position = "top",
+                     colnames_angle = 90,
+                     colnames_offset_y = 7.5,
+                     font.size = 4,
+                     color = "grey50") + 
+  scale_fill_viridis_c(option="inferno",
+                       direction = -1,
+                       name = "CAZyme HMM Hits",
+                       breaks = c(0, 10, 20, 30, 40, 50, 60, 70, 80),
+                       guide = guide_colorbar(
+                         direction = "horizontal",
+                         title.position = "top",
+                         barwidth = 10,
+                         label.position = "bottom",
+                         label.theme = element_text(size = 9)
+                         )) +
+  theme(legend.title = element_text())
+
+
+
+pgp2_notip
+
+# save plot
+
+ggsave("./Plots/cazy_all_pure_isolates.pdf", pgp2_notip, width = 22, height = 12)
+
+```
+
+
+# Mucilage Sugar Analysis
+
+>  read in mucilage sugar metadata
+
+```{r}
+mucilage_cazymes <- read_csv("./meta_files/cazyme_family_meta.csv")
+mucilage_transporters <- read_csv("./meta_files/transporter_meta.csv")
+```
+
+## Sugar Transporters
+### Read in Transporter data
+```{r}
+# Read in the hmmscan Search output files for cazyme genes in each isolate's annotated faa list
+all_tp_list <- list.files(path = "./dbCAN2/transporters_diamond/", pattern = 'tp.out', recursive = T, full.names = T)
+
+# all_tp_list
+# Create a list of search output tables
+all_tp_tbl_list <- lapply(all_tp_list, read.delim)
+
+# set colnames
+all_tp_colnames <- c("qseqid",
+                     "sseqid",
+                     "pident",
+                     "length",
+                     "mismatch",
+                     "gapopen",
+                     "qstart",
+                     "qend",
+                     "sstart",
+                     "send",
+                     "evalue",
+                     "bitscore")
+
+all_tp_tbl_list <- lapply(all_tp_tbl_list, setNames, all_tp_colnames)
+
+# Add a column to every table that indicates the isolate genome for each Diamond-Transporter hit
+all_tp_tbl_list <- mapply(cbind, all_tp_tbl_list, "ID"=cazy_isolate_list$V1, SIMPLIFY=F)
+
+# Create One Dataframe for NIF-TIGRFAM matches of all isolates
+all_tp_df <- do.call('rbind', all_tp_tbl_list)
+
+## match old isolate ID on all_cazyme_df to BCW_ID on cazy df
+all_tp_df$old_ID <- abb_genome_bcw_labels$old_ID[match(all_tp_df$ID, abb_genome_bcw_labels$BCW.ID)]
+
+## create TCID variable
+all_tp_df$TCID <- word(all_tp_df$sseqid,4,sep = "\\|") # stringr package to extract words from sseqid variable
+
+# check to confirm 611 unique isolates
+nlevels(all_tp_df$ID)
+
+# colnames
+colnames(all_tp_df)
+
+str(all_tp_df)
+
+# inspect
+head(all_tp_df)
+```
+
+### Filter transporter hits
+
+> filter master dataframe to extract only records that match a TCID of interest based on metadata
+
+```{r}
+muci_tp_df <- all_tp_df %>% filter(TCID %in% mucilage_transporters$TCID)
+
+# add sugar association to each TCID
+
+muci_tp_df$Sugar <- mucilage_transporters$Sugar[match(muci_tp_df$TCID, mucilage_transporters$TCID)]
+
+# 
+
+head(muci_tp_df)
+
+```
+
+### Deduplicate Transporter Hits
+```{r}
+# count number of records for unique combinations of model, Isolate_ID, protein_query_id
+muci_tp_df_gp <- muci_tp_df %>% 
+  group_by(qseqid, sseqid) %>% 
+  mutate(count=(n()))
+
+muci_tp_df_dd <- muci_tp_df_gp %>% top_n(1, bitscore) # select match with top bitscore
+
+```
+
+> no duplicate alignment hits detected
+
+# Transporter Data Formatting
+```{r}
+# count number of occurrences of TCID matches from each genome for each sugar.
+muci_tp_df_counts <- muci_tp_df_dd %>% group_by(ID, Sugar) %>% count()
+
+# spread all counts for each cazy class
+muci_tp_df_spread <- spread(muci_tp_df_counts, Sugar, n)
+
+head(muci_tp_df_spread)
+
+```
+
+
+# Create Master Transporter Data Frame
+```{r}
+# transporter data for single isolates only
+tp_singles <- data.frame(ID=cazy_singles$ID) # grab list of cazy_singles to match
+
+tp_singles <- left_join(tp_singles, muci_tp_df_spread, by = "ID") %>%
+  select("ID",
+         "Arabinose",
+         "Fucose",
+         "Galactose",
+         "Glucuronate",
+         "Mannose",
+         "Xylose")
+
+# add zero for NA values
+tp_singles[is.na(tp_singles)] <- 0
+
+# add old_id
+tp_singles$old_ID <- abb_genome_bcw_labels$old_ID[match(tp_singles$ID, abb_genome_bcw_labels$BCW.ID)]
+
+# add genus information
+tp_singles$Genus <- all_genome_k31_lca$genus[match(tp_singles$ID, all_genome_k31_lca$ID)]
+
+# add unassigned to empty cells of genus
+tp_singles$Genus <- sub("^$", "unassigned", tp_singles$Genus)
+
+# add genus color
+tp_singles$genus_color <- genus_colors$Color[match(tp_singles$Genus, genus_colors$Genus)]
+
+# join sm_k31_df and tp_singles
+tp_master <- inner_join(sm_k31_cmp, tp_singles, by = "ID")
+
+# Genus as Factor
+tp_master$Genus <- as.factor(tp_master$Genus)
+str(tp_master[,493:502])
+
+# Create tx_name Variable with Hybrid genus + Isolate Name: GENUS sp. BCWXXXX
+tp_master$tx_name <- paste(tp_master$Genus, sprintf("sp. %s", tp_master$ID))
+
+# set rownames of tp_master to match tree tip labels
+rownames(tp_master) <- sm_k31_phylo$tip.label
+
+colnames(tp_master[,493:503])
+```
+
+### Plot transporter counts
+```{r}
+# Add gheatmap 0 for genus
+## use sm_k31_tree
+## use genus colors
+tp0_notip <- gheatmap(sm_k31_tree, tp_master[, 501, drop = F],
+                     offset = 0,
+                     width = 0.05,
+                     colnames_position = "top",
+                     colnames_angle = 0,
+                     colnames_offset_y = 7.5,
+                     font.size = 4,
+                     color = "grey50") + 
+  scale_fill_manual(values=c("#8EAFEB",
+                             "#9A61CE",
+                             "#8244E7",
+                             "#5DE58E",
+                             "#DE47DF",
+                             "#DFDC8F",
+                             "#79A560",
+                             "#DFE9D4",
+                             "#BDE9B4",
+                             "#E17FD9",
+                             "#9EEADA",
+                             "#6FE453",
+                             "#E1CFE2",
+                             "#5296B1",
+                             "#DA9EC3",
+                             "#919F85",
+                             "#906981",
+                             "#65E2BA",
+                             "#D9B99D",
+                             "#D6EC49",
+                             "#D8905B",
+                             "#DB459C",
+                             "#DC8790",
+                             "#6D79D1",
+                             "#A4C9DC",
+                             "#B0E477",
+                             "#E4C34F",
+                             "#5DD8E0",
+                             "#CFA3E9",
+                             "#E34D56"),
+                    name = "Genus",
+                    guide = guide_legend(
+                      direction = "vertical",
+                      ncol = 2,
+                      title.position = "top",
+                      label.position = "right"
+                      )
+  ) +
+  theme(legend.title = element_text(), legend.key.size = unit(.5, "cm"))
+
+# Add gheatmap 1 for transporter counts
+tp1_notip <- tp0_notip + new_scale_fill()
+
+tp2_notip <- gheatmap(tp1_notip, tp_master[, 494:499, drop = F],
+                     offset = 0.25,
+                     width = 0.3,
+                     colnames_position = "top",
+                     colnames_angle = 0,
+                     colnames_offset_y = 7.5,
+                     font.size = 3,
+                     color = "grey50") + 
+  scale_fill_viridis_c(option="inferno",
+                       direction = -1,
+                       name = "TCDB Diamond Hits",
+                       breaks = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+                       guide = guide_colorbar(
+                         direction = "horizontal",
+                         title.position = "top",
+                         barwidth = 10,
+                         label.position = "bottom",
+                         label.theme = element_text(size = 9)
+                         )) +
+  theme(legend.title = element_text()) #+ geom_tiplab2(size = 1.5, offset = 1.6)
+
+tp2_notip_rot <- print(rotate_tree(tp2_notip, -83))
+
+# save plot
+
+ggsave("./Plots/tp_all_pure_isolates.pdf", tp2_notip_rot, width = 22, height = 12)
+
+```
+
+# Mucilage Sugar GHs
+
+> filter CAZy master dataframe to extract only records that match a Glycosyl Hydrolase family of interest based on metadata
+
+```{r}
+# subset cazyme metadata for ghs
+mucilage_ghs <- mucilage_cazymes %>% filter(Class == "GH")
+
+unique(mucilage_ghs$Activity)
+
+mucilage_gts <- mucilage_cazymes %>% filter(Class == "GT")
+unique(mucilage_gts$Activity)
+
+# look at filtered dataframe for all cazyme hits
+head(all_cazyme_df_filtered)
+```
+
+## Filter GH Model Hits
+```{r}
+# select only GHs
+muci_gh_df <- all_cazyme_df_filtered %>% filter(class == "GH")
+
+# trim '.hmm' extension
+muci_gh_df$Family <- word(muci_gh_df$Family, 1, sep = "\\.")
+head(muci_gh_df)
+
+# trim sub-family extension
+muci_gh_df$Family <- word(muci_gh_df$Family, 1, sep = "\\_")
+
+# filter to select only gh families of interest
+muci_gh_df <- muci_gh_df %>% filter(Family %in% mucilage_ghs$Family)
+
+# add activity association to each Family hit
+muci_gh_df$Activity <- mucilage_ghs$Activity[match(muci_gh_df$Family, mucilage_ghs$Family)]
+
+# 
+
+head(muci_gh_df)
+
+```
+
+### Deduplicate GH Hits
+```{r}
+# count number of records for unique combinations of model, Isolate_ID, protein_query_id
+muci_gh_df_gp <- muci_gh_df %>% 
+  group_by(Family, Query_ID) %>% 
+  mutate(count=(n()))
+
+muci_gh_df_dd <- muci_gh_df_gp %>% top_n(1, Coverage) # select match with top bitscore
+
+```
+
+> 2 duplicate alignment hits detected
+
+# Glycosyl Hydrolase Data Formatting
+```{r}
+# count number of occurrences of TCID matches from each genome for each sugar.
+muci_gh_df_counts <- muci_gh_df_dd %>% group_by(ID, Activity) %>% count()
+
+# spread all counts for each cazy class
+muci_gh_df_spread <- spread(muci_gh_df_counts, Activity, n)
+
+head(muci_gh_df_spread)
+colnames(muci_gh_df_spread)
+```
+
+
+# Master GH Dataframe
+```{r}
+# transporter data for single isolates only
+gh_singles <- data.frame(ID=cazy_singles$ID) # grab list of cazy_singles to match
+
+gh_singles <- left_join(gh_singles, muci_gh_df_spread, by = "ID") %>%
+  select("ID",
+         "Ara",
+         "Ara/Gal/GlcA/Man/Xyl",
+         "Ara/Xyl",
+         "Fuc",
+         "Fuc/GlcA/Xyl",
+         "Gal",
+         "Gal/GlcA",
+         "Gal/GlcA/Fuc/Man/Xyl",
+         "Gal/Man/Xyl",
+         "GlcA",
+         "Man",
+         "Xyl")
+
+# add zero for NA values
+gh_singles[is.na(gh_singles)] <- 0
+
+# add old_id
+gh_singles$old_ID <- abb_genome_bcw_labels$old_ID[match(gh_singles$ID, abb_genome_bcw_labels$BCW.ID)]
+
+# add genus information
+gh_singles$Genus <- all_genome_k31_lca$genus[match(gh_singles$ID, all_genome_k31_lca$ID)]
+
+# add unassigned to empty cells of genus
+gh_singles$Genus <- sub("^$", "unassigned", gh_singles$Genus)
+
+# add genus color
+gh_singles$genus_color <- genus_colors$Color[match(gh_singles$Genus, genus_colors$Genus)]
+
+# join sm_k31_df and gh_singles
+gh_master <- inner_join(sm_k31_cmp, gh_singles, by = "ID")
+
+# Genus as Factor
+gh_master$Genus <- as.factor(gh_master$Genus)
+str(gh_master[,493:508])
+
+# Create tx_name Variable with Hybrid genus + Isolate Name: GENUS sp. BCWXXXX
+gh_master$tx_name <- paste(gh_master$Genus, sprintf("sp. %s", gh_master$ID))
+
+# set rownames of gh_master to match tree tip labels
+rownames(gh_master) <- sm_k31_phylo$tip.label
+
+colnames(gh_master[,493:509])
+#str(gh_singles)
+#str(gh_master[,493:509])
+```
+
+### Plot GH counts
+```{r}
+# Add gheatmap 0 for genus
+
+sm_k31_tree_o20 <- ggtree(sm_k31_phylo, color = "black", size = 0.3, layout = "fan", open.angle = 20)
+
+
+## use genus colors
+gh0_notip <- gheatmap(sm_k31_tree_o20, gh_master[, 507, drop = F],
+                     offset = 0,
+                     width = 0.05,
+                     colnames_position = "top",
+                     colnames_angle = 0,
+                     colnames_offset_y = 13,
+                     font.size = 4,
+                     color = "grey50") + 
+  scale_fill_manual(values=c("#8EAFEB",
+                             "#9A61CE",
+                             "#8244E7",
+                             "#5DE58E",
+                             "#DE47DF",
+                             "#DFDC8F",
+                             "#79A560",
+                             "#DFE9D4",
+                             "#BDE9B4",
+                             "#E17FD9",
+                             "#9EEADA",
+                             "#6FE453",
+                             "#E1CFE2",
+                             "#5296B1",
+                             "#DA9EC3",
+                             "#919F85",
+                             "#906981",
+                             "#65E2BA",
+                             "#D9B99D",
+                             "#D6EC49",
+                             "#D8905B",
+                             "#DB459C",
+                             "#DC8790",
+                             "#6D79D1",
+                             "#A4C9DC",
+                             "#B0E477",
+                             "#E4C34F",
+                             "#5DD8E0",
+                             "#CFA3E9",
+                             "#E34D56"),
+                    name = "Genus",
+                    guide = guide_legend(
+                      direction = "vertical",
+                      ncol = 2,
+                      title.position = "top",
+                      title.theme = element_text(size = 18, hjust = 0.5),
+                      label.position = "right",
+                      label.theme = element_text(size = 14)
+                      )
+  ) +
+  theme(legend.title = element_text(), legend.key.size = unit(.5, "cm"))
+
+# Add gheatmap 1 for GH counts
+gh1_notip <- gh0_notip + new_scale_fill()
+
+gh2_notip <- gheatmap(gh1_notip, gh_master[, 494:505, drop = F],
+                     offset = 0.3,
+                     width = 0.4,
+                     colnames_position = "top",
+                     colnames_angle = 0,
+                     colnames_offset_y = 13,
+                     font.size = 2.75,
+                     color = "grey50") + 
+  scale_fill_viridis_c(option="magma",
+                       direction = -1,
+                       name = "Glycosyl Hydrolase HMM Hits",
+                       breaks = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+                       guide = guide_colorbar(
+                         direction = "horizontal",
+                         title.position = "top",
+                         title.theme = element_text(size = 18, hjust = 0.5),
+                         barwidth = 18,
+                         label.position = "bottom",
+                         label.theme = element_text(size = 14)
+                         )) +
+  theme(legend.title = element_text())
+
+gh2_notip_rot <- print(rotate_tree(gh2_notip, -80))
+
+# save plot
+
+ggsave("./Plots/gh_all_pure_isolates.pdf", gh2_notip_rot, width = 22, height = 12)
+
+```
+
+
+
+# Mucilage Sugar GTs
+
+## Filter GH Model Hits
+```{r}
+# select only gts
+muci_gt_df <- all_cazyme_df_filtered %>% filter(class == "GT")
+
+# trim '.hmm' extension
+muci_gt_df$Family <- word(muci_gt_df$Family, 1, sep = "\\.")
+head(muci_gt_df)
+
+# trim sub-family extension
+muci_gt_df$Family <- word(muci_gt_df$Family, 1, sep = "\\_")
+
+# filter to select only gt families of interest
+muci_gt_df <- muci_gt_df %>% filter(Family %in% mucilage_gts$Family)
+
+# add activity association to each Family hit
+muci_gt_df$Activity <- mucilage_gts$Activity[match(muci_gt_df$Family, mucilage_gts$Family)]
+
+# 
+
+head(muci_gt_df)
+
+```
+
+### Deduplicate GT Hits
+```{r}
+# count number of records for unique combinations of model, Isolate_ID, protein_query_id
+muci_gt_df_gp <- muci_gt_df %>% 
+  group_by(Family, Query_ID) %>% 
+  mutate(count=(n()))
+
+muci_gt_df_dd <- muci_gt_df_gp %>% top_n(1, Coverage) # select match with top coverage
+
+```
+
+> 0 duplicate alignment hits detected
+
+# Glycosyl Transferase Data Formatting
+```{r}
+# count number of occurrences of TCID matches from each genome for each sugar.
+muci_gt_df_counts <- muci_gt_df_dd %>% group_by(ID, Activity) %>% count()
+
+# spread all counts for each cazy class
+muci_gt_df_spread <- spread(muci_gt_df_counts, Activity, n)
+
+head(muci_gt_df_spread)
+colnames(muci_gt_df_spread)
+```
+
+
+# Master Glycosyl Transferase Data Frame
+```{r}
+# transporter data for single isolates only
+gt_singles <- data.frame(ID=cazy_singles$ID) # grab list of cazy_singles to match
+
+gt_singles <- left_join(gt_singles, muci_gt_df_spread, by = "ID") %>%
+  select("ID",
+         "Ara",
+         "Ara/Gal/Xyl",
+         "Fuc",
+         "Gal",
+         "Gal/GlcA/Fuc/Xyl",
+         "Gal/Man",
+         "Gal/Xyl",
+         "GlcA/Xyl",
+         "Man")
+
+# add zero for NA values
+gt_singles[is.na(gt_singles)] <- 0
+
+# add old_id
+gt_singles$old_ID <- abb_genome_bcw_labels$old_ID[match(gt_singles$ID, abb_genome_bcw_labels$BCW.ID)]
+
+# add genus information
+gt_singles$Genus <- all_genome_k31_lca$genus[match(gt_singles$ID, all_genome_k31_lca$ID)]
+
+# add unassigned to empty cells of genus
+gt_singles$Genus <- sub("^$", "unassigned", gt_singles$Genus)
+
+# add genus color
+gt_singles$genus_color <- genus_colors$Color[match(gt_singles$Genus, genus_colors$Genus)]
+
+# join sm_k31_df and gt_singles
+gt_master <- inner_join(sm_k31_cmp, gt_singles, by = "ID")
+
+# Genus as Factor
+gt_master$Genus <- as.factor(gt_master$Genus)
+colnames(gt_master[,493:505])
+
+# Create tx_name Variable with Hybrid genus + Isolate Name: GENUS sp. BCWXXXX
+gt_master$tx_name <- paste(gt_master$Genus, sprintf("sp. %s", gt_master$ID))
+
+# set rownames of gt_master to match tree tip labels
+rownames(gt_master) <- sm_k31_phylo$tip.label
+```
+
+### Plot GT counts
+```{r}
+
+# 15 degree open angle tree
+sm_k31_tree_o15 <- ggtree(sm_k31_phylo, color = "black", size = 0.3, layout = "fan", open.angle = 15)
+
+
+## use genus colors
+gt0_notip <- gheatmap(sm_k31_tree_o20, gt_master[, "Genus", drop = F],
+                     offset = 0,
+                     width = 0.05,
+                     colnames_position = "top",
+                     colnames_angle = 0,
+                     colnames_offset_y = 13,
+                     font.size = 3,
+                     color = "grey50") + 
+  scale_fill_manual(values=c("#8EAFEB",
+                             "#9A61CE",
+                             "#8244E7",
+                             "#5DE58E",
+                             "#DE47DF",
+                             "#DFDC8F",
+                             "#79A560",
+                             "#DFE9D4",
+                             "#BDE9B4",
+                             "#E17FD9",
+                             "#9EEADA",
+                             "#6FE453",
+                             "#E1CFE2",
+                             "#5296B1",
+                             "#DA9EC3",
+                             "#919F85",
+                             "#906981",
+                             "#65E2BA",
+                             "#D9B99D",
+                             "#D6EC49",
+                             "#D8905B",
+                             "#DB459C",
+                             "#DC8790",
+                             "#6D79D1",
+                             "#A4C9DC",
+                             "#B0E477",
+                             "#E4C34F",
+                             "#5DD8E0",
+                             "#CFA3E9",
+                             "#E34D56"),
+                    name = "Genus",
+                    guide = guide_legend(
+                      direction = "vertical",
+                      ncol = 2,
+                      title.position = "top",
+                      title.theme = element_text(size = 18, hjust = 0.5),
+                      label.position = "right",
+                      label.theme = element_text(size = 14)
+                      )) + theme(legend.title = element_text(),
+                                 legend.key.size = unit(.5, "cm"))
+
+# Add gheatmap 1 for GT counts
+gt1_notip <- gt0_notip + new_scale_fill()
+
+gt2_notip <- gheatmap(gt1_notip, gt_master[, 494:502, drop = F],
+                     offset = 0.3,
+                     width = 0.3,
+                     colnames_position = "top",
+                     colnames_angle = 0,
+                     colnames_offset_y = 13,
+                     font.size = 2,
+                     color = "grey50") + 
+  scale_fill_viridis_c(option="magma",
+                       direction = -1,
+                       name = "Glycosyl Transferase HMM Hits",
+                       breaks = c(0, 5, 10, 15, 20, 25, 30, 35, 40, 45),
+                       guide = guide_colorbar(
+                         direction = "horizontal",
+                         title.position = "top",
+                         title.theme = element_text(size = 18, hjust = 0.5),
+                         barwidth = 18,
+                         label.position = "bottom",
+                         label.theme = element_text(size = 14)
+                         )) +
+  theme(legend.title = element_text(), legend.position = "right")
+
+gt2_notip_rot <- print(rotate_tree(gt2_notip, -80))
+
+# save plot
+
+ggsave("./Plots/Fig_S2.pdf", gt2_notip_rot, width = 13, height = 8)
+
+```
+
+
+## Grid Plot
+```{r}
+library(cowplot)
+```
+
+
+### Genus Legend
+```{r}
+## use genus colors
+genus_combo <- gheatmap(sm_k31_tree_o15, gh_master[, "Genus", drop = F],
+                     offset = 0,
+                     width = 0.05,
+                     colnames_position = "top",
+                     colnames_angle = 0,
+                     colnames_offset_y = 9,
+                     font.size = 3,
+                     color = "grey50") + 
+  scale_fill_manual(values=c("#8EAFEB",
+                             "#9A61CE",
+                             "#8244E7",
+                             "#5DE58E",
+                             "#DE47DF",
+                             "#DFDC8F",
+                             "#79A560",
+                             "#DFE9D4",
+                             "#BDE9B4",
+                             "#E17FD9",
+                             "#9EEADA",
+                             "#6FE453",
+                             "#E1CFE2",
+                             "#5296B1",
+                             "#DA9EC3",
+                             "#919F85",
+                             "#906981",
+                             "#65E2BA",
+                             "#D9B99D",
+                             "#D6EC49",
+                             "#D8905B",
+                             "#DB459C",
+                             "#DC8790",
+                             "#6D79D1",
+                             "#A4C9DC",
+                             "#B0E477",
+                             "#E4C34F",
+                             "#5DD8E0",
+                             "#CFA3E9",
+                             "#E34D56"),
+                    name = "Genus",
+                    guide = guide_legend(
+                      direction = "vertical",
+                      ncol = 6,
+                      title.position = "top",
+                      title.theme = element_text(size = 18, hjust = 0.5),
+                      label.position = "right",
+                      label.theme = element_text(size = 14)
+                      )) + theme(legend.title = element_text(), legend.key.size = unit(.5, "cm"), legend.position = "bottom")
+
+genus_combo
+
+genus_legend <- get_legend(genus_combo)
+```
+
+### GH Legend
+```{r}
+gh_combo <- gheatmap(sm_k31_tree_o15, gh_master[, 494:504, drop = F],
+                     offset = 0.3,
+                     width = 0.3,
+                     colnames_position = "top",
+                     colnames_angle = 0,
+                     colnames_offset_y = 9.5,
+                     font.size = 2,
+                     color = "grey50") + 
+  scale_fill_viridis_c(option="magma",
+                       direction = -1,
+                       name = "Glycosyl Hydrolase HMM Hits",
+                       breaks = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+                       guide = guide_colorbar(
+                         direction = "horizontal",
+                         title.position = "top",
+                         title.theme = element_text(size = 18, hjust = 0.5),
+                         barwidth = 18,
+                         label.position = "bottom",
+                         label.theme = element_text(size = 14)
+                         )) +
+  theme(legend.title = element_text(), legend.position = "bottom")
+gh_combo_rot <- print(rotate_tree(gh_combo, -82))
+
+gh_legend <- get_legend(gh_combo)
+```
+
+### Transporter Legend
+```{r}
+tp_combo <- gheatmap(sm_k31_tree_o15, tp_master[, 494:499, drop = F],
+                     offset = 0.25,
+                     width = 0.3,
+                     colnames_position = "top",
+                     colnames_angle = 0,
+                     colnames_offset_y = 7.5,
+                     font.size = 3,
+                     color = "grey50") + 
+  scale_fill_viridis_c(option="inferno",
+                       direction = -1,
+                       name = "TCDB Diamond Hits",
+                       breaks = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+                       guide = guide_colorbar(
+                         direction = "horizontal",
+                         title.position = "top",
+                         title.theme = element_text(size = 18, hjust = 0.5),
+                         barwidth = 18,
+                         label.position = "bottom",
+                         label.theme = element_text(size = 14)
+                         )) +
+  theme(legend.title = element_text(), legend.position = "bottom")
+
+tp_combo_rot <- print(rotate_tree(tp_combo, -83))
+
+tp_legend <- get_legend(tp_combo)
+```
+
+
+#### Plot Grid
+
+```{r}
+## Plot Array
+combo_plot <- plot_grid(gh2_notip_rot + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+                                              legend.position = "none"),
+                        tp2_notip_rot + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+                                              legend.position = "none"),
+                        labels = c("A", "B"),
+                        label_size = 24,
+                        nrow = 1,
+                        vjust = 7,
+                        align = 'h'
+                        )
+
+## Legend Array
+combo_legend <- plot_grid(gh_legend,
+                          genus_legend,
+                          tp_legend,
+                          nrow = 1,
+                          align = 'hv'
+                          )
+
+combo_grid <- plot_grid(combo_plot, combo_legend,
+                    ncol = 1,
+                    rel_heights = c(1, 0.1))
+combo_grid
+
+ggsave("./plots/Fig2.pdf", combo_grid, width = 22, height = 16)
+```
+
+## Supplemental Tables
+
+> Make dataframes for supplemental tables
+
+### Transporters
+```{r}
+# Transporters 1
+colnames(tp_singles)
+sup_table_tp <- tp_singles %>% select(ID, Genus, Arabinose, Fucose, Galactose, Glucuronate, Mannose, Xylose)
+
+write_csv(sup_table_tp, "./supp_tables/single_isolate_transporters_by_sugar.csv")
+
+# Transporters 2
+# count number of occurrences of matches from each genome for each TCID.
+muci_tp_df_counts_tcid <- muci_tp_df_dd %>% group_by(ID, TCID) %>% count()
+# spread all counts for each cazy class
+muci_tp_df_spread_tcid <- spread(muci_tp_df_counts_tcid, TCID, n)
+muci_tp_df_spread_tcid[is.na(muci_tp_df_spread_tcid)] <- 0
+write_csv(muci_tp_df_spread_tcid, "./supp_tables/tcid_counts_single_isolates.csv")
+
+```
+
+### GHs
+```{r}
+# Transporters 1
+colnames(gh_singles)
+sup_table_gh <- gh_singles %>% select(ID,
+                                      Genus,
+                                      Ara,
+                                      `Ara/Gal/GlcA/Man/Xyl`,
+                                      `Ara/Xyl`,
+                                      Fuc,
+                                      `Fuc/GlcA/Xyl`,
+                                      Gal,
+                                      `Gal/GlcA`,
+                                      `Gal/GlcA/Fuc/Man/Xyl`,
+                                      `Gal/Man/Xyl`,
+                                      GlcA,
+                                      Man)
+
+write_csv(sup_table_gh, "./supp_tables/single_isolate_ghs_by_activity.csv")
+
+# count number of occurrences of matches from each genome for each TCID.
+muci_gh_df_counts_family <- muci_gh_df_dd %>% group_by(ID, Family) %>% count()
+# spread all counts for each cazy class
+muci_gh_df_spread_family <- spread(muci_gh_df_counts_family, Family, n)
+muci_gh_df_spread_family[is.na(muci_gh_df_spread_family)] <- 0
+write_csv(muci_gh_df_spread_family, "./supp_tables/gh_family_counts_single_isolates.csv")
+
+```
+
+### GTs
+```{r}
+# Glycosyl Transferases 1
+colnames(gt_singles)
+sup_table_gt <- gt_singles %>% select(ID,
+                                      Genus,
+                                      Ara,
+                                      `Ara/Gal/Xyl`,
+                                      Fuc,
+                                      Gal,
+                                      `Gal/GlcA/Fuc/Xyl`,
+                                      `Gal/Man`,
+                                      `Gal/Xyl`,
+                                      `GlcA/Xyl`,
+                                      Man)
+
+write_csv(sup_table_gt, "./supp_tables/single_isolate_gts_by_activity.csv")
+
+# Transporters 2
+# count number of occurrences of matches from each genome for each TCID.
+muci_gt_df_counts_family <- muci_gt_df_dd %>% group_by(ID, Family) %>% count()
+# spread all counts for each cazy class
+muci_gt_df_spread_family <- spread(muci_gt_df_counts_family, Family, n)
+muci_gt_df_spread_family[is.na(muci_gt_df_spread_family)] <- 0
+write_csv(muci_gt_df_spread_family, "./supp_tables/gt_family_counts_single_isolates.csv")
+
+```
+
+## GH Summary Values
+```{r}
+colnames(sup_table_gh)
+
+# Ara - GH{62,127,137,142,146}
+sup_table_gh.ara <- sup_table_gh %>% 
+  group_by(Genus, Ara) %>%
+  filter(Ara >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = Ara, values_from = n, names_prefix = "Ara_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_gh.ara_sum <- sup_table_gh.ara %>%
+  mutate(Ara = rowSums(.[2:3])) %>%
+  select(Genus, Ara)
+
+# Ara/Gal/GlcA/Man/Xyl - GH2
+sup_table_gh.ara5 <- sup_table_gh %>% 
+  group_by(Genus, `Ara/Gal/GlcA/Man/Xyl`) %>%
+  filter(`Ara/Gal/GlcA/Man/Xyl` >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = `Ara/Gal/GlcA/Man/Xyl`, values_from = n, names_prefix = "Ara/Gal/GlcA/Man/Xyl_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_gh.ara5_sum <- sup_table_gh.ara5 %>%
+  mutate(`Ara/Gal/GlcA/Man/Xyl` = rowSums(.[2:3])) %>%
+  select(Genus, `Ara/Gal/GlcA/Man/Xyl`)
+
+# Ara/Xyl - GH{3,43,51,54}
+sup_table_gh.ara.xyl <- sup_table_gh %>% 
+  group_by(Genus, `Ara/Xyl`) %>%
+  filter(`Ara/Xyl` >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = `Ara/Xyl`, values_from = n, names_prefix = "Ara/Xyl_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_gh.ara.xyl_sum <- sup_table_gh.ara.xyl %>%
+  mutate(`Ara/Xyl` = rowSums(.[2:11])) %>%
+  select(Genus, `Ara/Xyl`)
+
+# Fuc - GH{29,95,139,141,151}
+sup_table_gh.fuc <- sup_table_gh %>% 
+  group_by(Genus, Fuc) %>%
+  filter(Fuc >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = Fuc, values_from = n, names_prefix = "Fuc_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_gh.fuc_sum <- sup_table_gh.fuc %>%
+  mutate(Fuc = rowSums(.[2])) %>%
+  select(Genus, Fuc)
+
+# Fuc/GlcA/Xyl - GH30
+sup_table_gh.fuc.glcA.xyl <- sup_table_gh %>% 
+  group_by(Genus, `Fuc/GlcA/Xyl`) %>%
+  filter(`Fuc/GlcA/Xyl` >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = `Fuc/GlcA/Xyl`, values_from = n, names_prefix = "Fuc/GlcA/Xyl_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_gh.fuc.glcA.xyl_sum <- sup_table_gh.fuc.glcA.xyl %>%
+  mutate(`Fuc/GlcA/Xyl` = rowSums(.[2])) %>%
+  select(Genus, `Fuc/GlcA/Xyl`)
+
+# Gal - GH{16,27,35,36,42,57,59,95,97,98,110,147,160,165}
+sup_table_gh.gal <- sup_table_gh %>% 
+  group_by(Genus, Gal) %>%
+  filter(Gal >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = Gal, values_from = n, names_prefix = "Gal_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_gh.gal_sum <- sup_table_gh.gal %>%
+  mutate(Gal = rowSums(.[2:6])) %>%
+  select(Genus, Gal)
+
+# Gal/GlcA - GH4
+sup_table_gh.gal.glcA <- sup_table_gh %>% 
+  group_by(Genus, `Gal/GlcA`) %>%
+  filter(`Gal/GlcA` >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = `Gal/GlcA`, values_from = n, names_prefix = "Gal/GlcA_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_gh.gal.glcA_sum <- sup_table_gh.gal.glcA %>%
+  mutate(`Gal/GlcA` = rowSums(.[2:8])) %>%
+  select(Genus, `Gal/GlcA`)
+
+# Gal/GlcA/Fuc/Man/Xyl - GH1
+sup_table_gh.gal5 <- sup_table_gh %>% 
+  group_by(Genus, `Gal/GlcA/Fuc/Man/Xyl`) %>%
+  filter(`Gal/GlcA/Fuc/Man/Xyl` >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = `Gal/GlcA/Fuc/Man/Xyl`, values_from = n, names_prefix = "Gal/GlcA/Fuc/Man/Xyl_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_gh.gal5_sum <- sup_table_gh.gal5 %>%
+  mutate(`Gal/GlcA/Fuc/Man/Xyl` = rowSums(.[2:12])) %>%
+  select(Genus, `Gal/GlcA/Fuc/Man/Xyl`)
+
+# Gal/Man/Xyl - GH 31
+sup_table_gh.gal.man.xyl <- sup_table_gh %>% 
+  group_by(Genus, `Gal/Man/Xyl`) %>%
+  filter(`Gal/Man/Xyl` >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = `Gal/Man/Xyl`, values_from = n, names_prefix = "Gal/Man/Xyl_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_gh.gal.man.xyl_sum <- sup_table_gh.gal.man.xyl %>%
+  mutate(`Gal/Man/Xyl` = rowSums(.[2:6])) %>%
+  select(Genus, `Gal/Man/Xyl`)
+
+# GlcA - GH{67,79,115,154}
+sup_table_gh.glcA <- sup_table_gh %>% 
+  group_by(Genus, GlcA) %>%
+  filter(GlcA >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = GlcA, values_from = n, names_prefix = "GlcA_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_gh.glcA_sum <- sup_table_gh.glcA %>%
+  mutate(GlcA = rowSums(.[2:3])) %>%
+  select(Genus, GlcA)
+
+# Man - GH{5,38,47,63,92,99,125,130,164}
+sup_table_gh.man <- sup_table_gh %>% 
+  group_by(Genus, Man) %>%
+  filter(Man >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = Man, values_from = n, names_prefix = "Man_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_gh.man_sum <- sup_table_gh.man %>%
+  mutate(Man = rowSums(.[2:6])) %>%
+  select(Genus, Man)
+
+# Merge tables
+## create list of 'sum' tables
+sup_table_gh_list <- mget(ls(pattern = "_sum"))
+
+## merge all sum tables into one
+sup_table_gh_all <- Reduce(
+  function(x, y, ...) merge(x, y, all = TRUE, ...),
+  sup_table_gh_list
+)
+
+## add Micrococcus (only one isolate) in with zeros (it only has GH13 and GH65, acting on glucose and gluco-oligos)
+sup_table_gh_all <- sup_table_gh_all %>% 
+  rbind(c("Micrococcus", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)) %>% 
+  replace(is.na(.), 0) %>%
+  arrange(Genus)
+
+# add total number of isolates identified for each genus out of the 492 isolates
+genus_totals <- gh_singles %>% group_by(Genus) %>% count()
+sup_table_gh_all <- right_join(sup_table_gh_all, genus_totals, by = "Genus")
+
+# add sumtotals at bottom
+sup_table_gh_all[,2:12] <- sapply(sup_table_gh_all[,2:12], as.numeric)
+#str(sup_table_gh_all)
+sup_table_gh_all[31,(2:13)] <- colSums(sup_table_gh_all[,2:13], na.rm=TRUE)
+sup_table_gh_all[31,1] <- "Total"
+
+# write to csv
+write_csv(sup_table_gh_all, "./supp_tables/sup_table_gh_all.csv", col_names = TRUE)
+
+```
+
+
+## Transporter Summary Values
+
+```{r}
+
+colnames(sup_table_tp)
+
+# Ara
+sup_table_tp.ara <- sup_table_tp %>% 
+  group_by(Genus, Arabinose) %>%
+  filter(Arabinose >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = Arabinose, values_from = n, names_prefix = "Arabinose_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_tp.ara_sum <- sup_table_tp.ara %>%
+  mutate(Arabinose = rowSums(.[2:11])) %>%
+  select(Genus, Arabinose)
+
+# Fuc
+sup_table_tp.fuc <- sup_table_tp %>% 
+  group_by(Genus, Fucose) %>%
+  filter(Fucose >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = Fucose, values_from = n, names_prefix = "Fucose_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_tp.fuc_sum <- sup_table_tp.fuc %>%
+  mutate(Fucose = rowSums(.[2:7])) %>%
+  select(Genus, Fucose)
+
+# Gal
+sup_table_tp.gal <- sup_table_tp %>% 
+  group_by(Genus, Galactose) %>%
+  filter(Galactose >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = Galactose, values_from = n, names_prefix = "Galactose_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_tp.gal_sum <- sup_table_tp.gal %>%
+  mutate(Galactose = rowSums(.[2:9])) %>%
+  select(Genus, Galactose)
+
+# GlcA
+sup_table_tp.glcA <- sup_table_tp %>% 
+  group_by(Genus, Glucuronate) %>%
+  filter(Glucuronate >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = Glucuronate, values_from = n, names_prefix = "Glucuronate_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_tp.glcA_sum <- sup_table_tp.glcA %>%
+  mutate(Glucuronate = rowSums(.[2:5])) %>%
+  select(Genus, Glucuronate)
+
+# Man
+sup_table_tp.man <- sup_table_tp %>% 
+  group_by(Genus, Mannose) %>%
+  filter(Mannose >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = Mannose, values_from = n, names_prefix = "Mannose_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_tp.man_sum <- sup_table_tp.man %>%
+  mutate(Mannose = rowSums(.[2:10])) %>%
+  select(Genus, Mannose)
+
+# Xylose
+sup_table_tp.xyl <- sup_table_tp %>% 
+  group_by(Genus, Xylose) %>%
+  filter(Xylose >= 1) %>%
+  count() %>%
+  pivot_wider(names_from = Xylose, values_from = n, names_prefix = "Xylose_") %>%
+  replace(is.na(.), 0) %>%
+  as_tibble()
+## Sum rows
+sup_table_tp.xyl_sum <- sup_table_tp.xyl %>%
+  mutate(Xylose = rowSums(.[2:8])) %>%
+  select(Genus, Xylose)
+
+# Merge tables
+## create list of 'sum' tables
+sup_table_tp_list <- mget(ls(pattern = "_tp.[A-z]*_sum"))
+
+## merge all sum tables into one
+sup_table_tp_all <- Reduce(
+  function(x, y, ...) merge(x, y, all = TRUE, ...),
+  sup_table_tp_list
+)
+
+# add total number of isolates identified for each genus out of the 492 isolates
+sup_table_tp_all <- right_join(sup_table_tp_all, genus_totals, by = "Genus")
+
+# replace NA with zero
+sup_table_tp_all <- sup_table_tp_all %>% replace(is.na(.), 0)
+
+# add sumtotals at bottom
+sup_table_tp_all[,2:8] <- sapply(sup_table_tp_all[,2:8], as.numeric)
+#str(sup_table_tp_all)
+sup_table_tp_all[31,(2:8)] <- colSums(sup_table_tp_all[,2:8], na.rm=TRUE)
+sup_table_tp_all[31,1] <- "Total"
+
+# write to csv
+write_csv(sup_table_tp_all, "./supp_tables/sup_table_tp_all.csv", col_names = TRUE)
+```
+

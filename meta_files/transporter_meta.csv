@@ -1,0 +1,60 @@
+﻿Sugar,TCID,Type,Description
+Fucose,2.A.1.1.1,Symporter,"Galactose:H+ symporter, GalP. Also transports glucose, xylose, fucose (6-deoxygalactose), 2-deoxygalactose and 2-deoxyglucose) (Henderson and Giddens 1977; Henderson et al. 1977; Hernández-Montalvo et al., 2001)"
+Fucose,2.A.1.7.1,Symporter,L-Fucose:H+
+Fucose,3.A.1.1.47,ABC-Type,Fucose uptake porter FucABCD
+Fucose,3.A.1.2.5,Putative,"Multiple sugar (arabinose, xylose, galactose, glucose, fucose)"
+Fucose,3.A.1.5.30,Oligosaccharide,Putative fucose-glucose oligosaccharide porter
+Fucose,4.A.6.1.9,PTS,ucose PTS uptake transporter (FcsABCD)
+Fucose,9.B.97.1.4,Acetylase,Putative fucose 4-O acetylase
+Galactose,2.A.1.1.1,Symporter,Galactose:H+
+Galactose,2.A.1.1.2,Symporter,Arabinose (xylose; galactose):H+
+Galactose,2.A.1.1.55,Symporter,"L-arabinose:proton symporter; Also transports xylose, galactose and α-1,5 arabinobiose"
+Galactose,2.A.1.7.2,Porter,Glucose/galactose porter
+Galactose,2.A.1.7.7,Porter,"The Na+-dependent sugar transporter, HP1174 (transports glucose, galactose, mannose and 2-deoxyglucose (Psakis et al. 2009)). (most similar to 2.A.1.7.2; 49% identity)"
+Galactose,2.A.2.2.3,Permease,Galactose permease of 462 aas and 12 TMSs
+Galactose,2.A.21.3.2,Symporter,Glucose or galactose:Na+ symporter
+Galactose,2.A.21.3.9,Putative,"The putative galactose porter, GalPll (Rodionov et al., 2010)."
+Galactose,3.A.1.2.3,Porter,Galactose/glucose (methyl galactoside) porter
+Galactose,3.A.1.2.5,Putative,"Multiple sugar (arabinose, xylose, galactose, glucose, fucose)"
+Mannose,2.A.1.7.11,Putative,"The putative mannose porter, ManPl (Rodionov et al., 2010)."
+Mannose,2.A.1.7.16,Putative,"The putative mannose porter, ManP (Rodionov D.A., personal communication). Regulated by mannose regulon ManR."
+Mannose,2.A.1.7.3,Symporter,Glucose/Mannose/Xylose: H+ symporter
+Mannose,2.A.1.7.7,Porter,"The Na+-dependent sugar transporter, HP1174 (transports glucose, galactose, mannose and 2-deoxyglucose (Psakis et al. 2009)). (most similar to 2.A.1.7.2; 49% identity)"
+Mannose,2.A.21.3.8,Porter,"The putative mannose porter, ManPll (Rodionov et al. 2010)."
+Mannose,3.A.1.1.24,ABC-Type,"The glucose/mannose porter TTC0326-8 plus MalK1 (ABC protein, shared with 3.A.1.1.25) (Chevance et al., 2006)."
+Mannose,3.A.1.2.7,Porter,Fructose/mannose/ribose porter
+Mannose,3.A.1.5.15,Porter,"Probable mannose/mannoside porter. Induced by beta-mannan (Conners et al., 2005). Regulated by mannose-responsive regulator manR (Kazanov et al., 2012)."
+Mannose,4.A.2.1.6,Porter,The mannose porter (ManP) (Sun and Altenbuchner 2010)
+Mannose,4.A.6.1.1,PTS,"The mannose (glucose, 2-deoxyglucose, glucosamine, N-acetylglucosamine, N-acetylmannosamine, mannosamine and fructose) PTS porter/group translocator, ManXYZ (Rephaeli and Saier 1980; Plumbridge 2015)"
+Mannose,4.A.6.1.11,PTS,"Mannose enzyme II complex, IIAB, IIC, IID. IIC/IID serve allows entry of some bacteriocins including pediocin (class IIa) and lactococcin A (class IIc) (Kjos et al., 2011)"
+Mannose,4.A.6.1.15,Porter,"The primary glucose /mannose uptake transporter, ManLMN (Aké et al. 2011)."
+Mannose,4.A.6.1.21,PTS,"Putative Mannose Enzyme II complex including IIA, IIB, IIC and IID; IIC has 231 aas and 6 TMSs."
+Mannose,4.A.6.1.22,PTS,"PTS Mannose-like Enzyme II complex.  IIC, 257 aas and 6 TMSs.  Hits 4.A.6.2.1, 3.1 and 4.1 with scores of e-6 - e-12."
+Mannose,4.A.6.1.6,Porter,"Glucose porter, ManLMN (Yebra et al., 2006)"
+Mannose,4.A.6.1.7,PTS,"The glucose/mannose/2-deoxyglucose/fructose phosphotransferase systems (phosphorylates without transport), ManLMN (Cochu et al., 2003)"
+Mannose,4.A.6.4.1,Putative PTS,"Putative mannose/fructose/sorbose PTS Enzyme IIC of 304 aas with 11 predicted TMSs.  No IIA, IIB or IID domain for the mannose/sorbose PTS family was identified in the entire proteome of A. arabaticum."
+Arabinose,2.A.1.1.116,Porter,"Arabinose/xylose transporter, AraE (Wang et al. 2013)."
+Arabinose,2.A.1.1.2,Symporter,"Arabinose (xylose; galactose):H+ symporter, AraE (low affinity high capacity) (Khlebnikov et al. 2001)."
+Arabinose,2.A.1.1.55,Symporter,"L-arabinose:proton symporter, AraE (Sa-Nogueira and Ramos, 1997). Also transports xylose, galactose and α-1,5 arabinobiose (Ferreira and Sá-Nogueira, 2010)."
+Arabinose,2.A.1.2.15,Antiporter,"Arabinose (but not xylose) and isopropyl β-D-thio-galactopyranoside:H+ antiporter, YdeA (Koita and Rao 2012)."
+Arabinose,2.A.21.3.19,Putative,"The putative arabinose porter, AraP (Rodionov D.A., personal communication). Regulated by arabinose regulon AraR."
+Arabinose,3.A.1.1.37,Putative,Predicted arabinoside porter. Regulated by arabinose-responsive regulator AraR (Rodionova et al.2012).
+Arabinose,3.A.1.2.14,Putative,Putative L-arabinose porter (Rodionov et al. 2010).
+Arabinose,3.A.1.2.2,Porter,Arabinose porter (Horazdovsky and Hogg 1989).
+Arabinose,3.A.1.2.5,Putative,"Multiple sugar (arabinose, xylose, galactose, glucose, fucose) putative porter"
+Xylose,2.A.1.1.1,Symporter,"Galactose:H+ symporter, GalP. Also transports glucose, xylose, fucose (6-deoxygalactose), 2-deoxygalactose and 2-deoxyglucose) (Henderson and Giddens 1977; Henderson et al. 1977; Hernández-Montalvo et al., 2001)"
+Xylose,2.A.1.1.116,Porter,"Arabinose/xylose transporter, AraE (Wang et al. 2013)."
+Xylose,2.A.1.1.2,Symporter,"Arabinose (xylose; galactose):H+ symporter, AraE (low affinity high capacity) (Khlebnikov et al. 2001)."
+Xylose,2.A.1.1.3,Symporter,Xylose (xylopyranose):H+ symporter of 491 aas and 12 TMSs (Wambo et al. 2017)
+Xylose,2.A.1.1.41,Symporter,"The D-xylose:H+ symporter, XylT (Km=220 μM; inhibited competitively by 6-deoxyglucose (Ki=220 μM), but not by other sugars tested) (Chaillou et al., 1998)"
+Xylose,2.A.1.1.55,Symporter,"L-arabinose:proton symporter, AraE (Sa-Nogueira and Ramos, 1997). Also transports xylose, galactose and α-1,5 arabinobiose (Ferreira and Sá-Nogueira, 2010)."
+Xylose,2.A.1.7.3,Symporter,"Glucose/Mannose/Xylose: H+ symporter (Paulsen et al., 1998; G.Gosset, personal communication)."
+Xylose,3.A.1.2.18,Porter,"Xylose porter (Nanavati et al. 2006). Regulated by xylose-responsive regulator XylR (Kazanov et al., 2012)."
+Xylose,3.A.1.2.26,Porter,"Xylose transporter, XylFGH (XylF (R), 359 aas; XylG (C), 525 aas; XylH (M), 389 aas"
+Xylose,3.A.1.2.4,Porter,Xylose porter
+Xylose,3.A.1.2.5,Putative,"Multiple sugar (arabinose, xylose, galactose, glucose, fucose) putative porter"
+Xylose,3.A.1.5.13,Oligosaccharide,"Probable xylan oligosaccharide porter (Conners et al., 2005). Induced by xylan and xylose. Regulated by xylose-responsive regulator XylR (Kazanov et al. 2012)."
+Glucuronate,1.B.25.1.14,Porin,"OdpF (OccK2) glucuronate-selective porin; may also transport benzoate and vanillate (Eren et al., 2012). 3-d structure is known (3SZD)."
+Glucuronate,2.A.1.14.2,Porter,"Hexuronate (glucuronate; galacturonate) porter, ExuT (Nemoz et al. 1976)."
+Glucuronate,2.A.1.14.41,Porter,"The Aldohexuronate (glucuronate, galacturonate) uptake porter (Valmeekam et al. 2001)."
+Glucuronate,3.A.1.1.9,Oligosaccharide,"The oligosaccharide (glucuronate-linked to a xylo-oligosaccharide) ABC uptake porter, GuoEFGK in AguEFGK. "
